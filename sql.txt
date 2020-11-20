@@ -1,0 +1,187 @@
+sqlite3
+
+PRAGMA foreign_keys = ON;
+
+
+create table retired(date text, Type text, inspectorID int, score int, notes text, building text, InspectionNumber int PRIMARY KEY);
+
+create table inspectors(employeeID int PRIMARY KEY, Name text, HireDate text, CHECK (employeeID<=999 AND employeeID>=100));
+
+create trigger deleteinspector before delete on inspectors for each row
+
+begin
+
+insert into retired select * from inspection where inspectorID = old.employeeID;
+delete from inspection where inspectorID = old.employeeID;
+
+end;
+
+CREATE TRIGGER inspectors_trigger BEFORE INSERT ON inspectors
+BEGIN
+ SELECT
+ CASE
+ WHEN NEW.Name NOT LIKE '%-%' THEN
+ RAISE (
+ ABORT,
+ 'Invalid Name'
+ )
+ WHEN NEW.HireDate NOT LIKE '____/%/%' THEN
+ RAISE (
+ ABORT,
+ 'Invalid HireDate'
+ )
+ END;
+END;
+
+
+create table builders(LicenseNumber int PRIMARY KEY, Name text, Address text, CHECK(length(Name)<=30), CHECK(length(Address)<=40), CHECK(LicenseNumber<=99999 AND LicenseNumber>=10000));
+
+
+create table inspection(date text, Type text, inspectorID int, score int, notes text, building text, InspectionNumber int PRIMARY KEY, CHECK(length(Type)=3 AND score is not null), Foreign Key (Type) References InspectionTypes(Code) ,Foreign Key (inspectorID) References inspectors(employeeID));
+CREATE TRIGGER inspection_trigger BEFORE INSERT ON inspection
+BEGIN
+ SELECT
+ CASE
+ WHEN (select count(inspectorID) from inspection where cast(substr(NEW.date,1,4)as int) = cast(substr(date,1,4)as int) AND cast(substr(NEW.date,6,7)as int) = cast(substr(date,6,7)as int) AND NEW.inspectorID = inspectorID)>5
+ THEN
+ RAISE (
+ ABORT,
+ 'This inspector has already inspected 5 times'
+ )
+ WHEN NEW.Type = 'PLU'AND (SELECT count(inspectorID) from inspection where NEW.building = building AND Type = 'FRM') = 0
+ THEN
+ RAISE (
+ ABORT,
+ 'PLUs prerequsite do not meet.'
+ )
+ WHEN NEW.Type = 'POL'AND (SELECT count(inspectorID) from inspection where NEW.building = building AND Type = 'PLU') = 0
+ THEN
+ RAISE (
+ ABORT,
+ 'POLs prerequsite do not meet.'
+ )
+ WHEN NEW.Type = 'ELE'AND (SELECT count(inspectorID) from inspection where NEW.building = building AND Type = 'FRM') = 0
+ THEN
+ RAISE (
+ ABORT,
+ 'ELEs prerequsite do not meet.'
+ )
+ WHEN NEW.Type = 'HAC'AND (SELECT count(inspectorID) from inspection where NEW.building = building AND Type = 'ELE') = 0
+ THEN
+ RAISE (
+ ABORT,
+ 'HACs prerequsite do not meet.'
+ )
+ WHEN NEW.Type = 'FNL'AND (SELECT count(inspectorID) from inspection where NEW.building = building AND Type = 'HAC' OR Type = 'PLU') = 0
+ THEN
+ RAISE (
+ ABORT,
+ 'FNLs prerequsite do not meet.'
+ )
+ WHEN NEW.Type = 'FNL2'AND (SELECT count(inspectorID) from inspection where NEW.building = building AND Type = 'ELE' OR Type = 'PLU') = 0
+ THEN
+ RAISE (
+ ABORT,
+ 'FNL2s prerequsite do not meet.'
+ )
+ WHEN NEW.Type = 'FN3'AND (SELECT count(inspectorID) from inspection where NEW.building = building AND Type = 'PLU') = 0
+ THEN
+ RAISE (
+ ABORT,
+ 'FN3s prerequsite do not meet.'
+ )
+ WHEN (select count(inspectorID) from retired where retired.inspectorID = 101)>=1
+ THEN
+ RAISE (
+ ABORT,
+ 'This inspector has already retired.'
+ )
+ END;
+END;
+
+create table buildings(BuilderNumber int, Address text, Type text, size int, DateFirstActivity text, BuildingNumber int PRIMARY KEY, Foreign Key (BuilderNumber) References builders(LicenseNumber));
+
+create table InspectionTypes(Code text PRIMARY KEY, Type text, prerequisite text, cost int, CHECK(length(Code)=3));
+
+create table PendingInspections(date text PRIMARY KEY, type text, building address text);
+
+
+insert into inspectors values(101,'Inspector-1','1984/11/8'),(102,'Inspector-2','1994/11/8'),(103,'Inspector-3','2004/11/8'),(104,'Inspector-4','2014/11/1'),(105,'Inspector-5','2018/11/1');
+
+insert into builders values(12345,'Builder-1','East University'),(23456,'Builder-2','South University'),(34567,'Builder-3','West University'),(45678,'Builder-4','North University'),(12321,'Builder-5','Central University');
+
+insert into InspectionTypes values('FRM',	'Framing',	'none',	100),
+('PLU',	'Plumbing',	'FRM',	100),
+('POL',	'Pool',	'PLU',	50),
+('ELE',	'Electrical',	'FRM',	100),
+('SAF',	'Safety',	'none',	50),
+('HAC',	'Heating/Cooling',	'ELE',	100),
+('FNL',	'Final',	'HAC, PLU',	200),
+('FN2',	'Final - 2 needed',	'ELE, PLU',	150),
+('FN3',	'Final - plumbing',	'PLU',	150),
+('HIS',	'Historical accuracy',	'none',	100);
+
+insert into inspection values
+('	2018/11/6	','FRM',	105,	100,	'okay',	'100 Industrial Ave., Fort Worth, TX',	1),
+('	2018/11/8	','PLU',	102,	100,	'no leaks',	'100 Industrial Ave., Fort Worth, TX',	2),
+('	2018/11/12	','POL',	102,	80,	'pool equipment okay',	'100 Industrial Ave., Fort Worth, TX',	3),
+('	2018/11/14	','FN3',	102,	100,	'no problems noted',	'100 Industrial Ave., Fort Worth, TX',	4),
+('	2018/10/1	','FRM',	103,	100,	'no problems noted',	'100 Winding Wood, Carrollton, TX',	5),
+('	2018/10/20	','PLU',	103,	100,	'everything working',	'100 Winding Wood, Carrollton, TX',	6),
+('	2018/10/25	','ELE',	103,	100,	'no problems noted',	'100 Winding Wood, Carrollton, TX',	7),
+('	2018/11/2	','HAC',	103,	100,	'no problems noted',	'100 Winding Wood, Carrollton, TX',	8),
+('	2018/11/14	','FNL',	103,	90,	'REJECT TOO MANY',	'100 Winding Wood, Carrollton, TX',	9),
+('	2018/11/1	','FRM',	103,	100,	'no problems noted',	'102 Winding Wood, Carrollton, TX',	10),
+('	2018/11/2	','PLU',	103,	90,	'minor leak, corrected',	'102 Winding Wood, Carrollton, TX',	11),
+('	2018/11/3	','ELE',	103,	80,	'exposed junction box',	'102 Winding Wood, Carrollton, TX',	12),
+('	2018/11/2	','FRM',	105,	100,	'tbd',	'105 Industrial Ave., Fort Worth, TX',	13),
+('	2018/10/1	','FRM',	101,	100,	'no problems noted',	'300 Oak St., Dallas, TX',	14),
+('	2018/10/2	','PLU',	101,	90,	'minor leak, corrected',	'300 Oak St., Dallas, TX',	15),
+('	2018/10/3	','ELE',	101,	80,	'exposed junction box',	'300 Oak St., Dallas, TX',	16),
+('	2018/10/4	','HAC',	101,	80,	'duct needs taping',	'300 Oak St., Dallas, TX',	17),
+('	2018/10/5	','FNL',	101,	90,	'ready for owner',	'300 Oak St., Dallas, TX',	18),
+('	2018/10/1	','FRM',	102,	100,	'no problems noted',	'302 Oak St., Dallas, TX',	19),
+('	2018/10/2	','PLU',	102,	25,	'massive leaks',	'302 Oak St., Dallas, TX',	20),
+('	2018/10/8	','PLU',	102,	50,	'still leaking',	'302 Oak St., Dallas, TX',	21),
+('	2018/10/12	','FRM',	103,	85,	'no issues but messy',	'210 Cherry Bark Lane, Plano, TX',	22),
+('	2018/10/14	','SAF',	104,	100,	'no problems noted',	'210 Cherry Bark Lane, Plano, TX',	23),
+('	2018/11/4	','PLU',	103,	80,	'duct needs sealing',	'210 Cherry Bark Lane, Plano, TX',	24),
+('	2018/11/5	','POL',	105,	90,	'ready for owner',	'210 Cherry Bark Lane, Plano, TX',	25),
+('	2018/10/12	','PLU',	102,	80,	'no leaks, but messy',	'302 Oak St., Dallas, TX',	26),
+('	2018/10/14	','ELE',	102,	100,	'no problems noted',	'302 Oak St., Dallas, TX',	27),
+('	2018/11/1	','HAC',	102,	80,	'duct needs taping',	'302 Oak St., Dallas, TX',	28),
+('	2018/11/2	','FNL',	102,	90,	'ready for owner',	'302 Oak St., Dallas, TX',	29);
+
+insert into buildings values
+(12345,	'100 Main St., Dallas, TX',	'commerical',	250000,	'1999/12/31',1),
+(12345,	'300 Oak St., Dallas, TX',	'residential',	3000,	'2000/1/1',2),
+(12345,	'302 Oak St., Dallas, TX',	'residential',	4000,	'2001/2/1',3),
+(12345,	'304 Oak St., Dallas, TX',	'residential',	1500,	'2002/3/1',4),
+(12345,	'306 Oak St., Dallas, TX',	'residential',	1500,	'2003/4/1',5),
+(12345,	'308 Oak St., Dallas, TX',	'residential',	2000,	'2003/4/1',6),
+(23456,	'100 Industrial Ave., Fort Worth, TX',	'commerical',	100000,	'2005/6/1',7),
+(23456,	'101 Industrial Ave., Fort Worth, TX',	'commerical',	80000,	'2005/6/1',8),
+(23456,	'102 Industrial Ave., Fort Worth, TX',	'commerical',	75000,	'2005/6/1',9),
+(23456,	'103 Industrial Ave., Fort Worth, TX',	'commerical',	50000,	'2005/6/1',10),
+(23456,	'104 Industrial Ave., Fort Worth, TX',	'commerical',	80000,	'2005/6/1',11),
+(23456,	'105 Industrial Ave., Fort Worth, TX',	'commerical',	90000,	'2005/6/1',12),
+(45678,	'100 Winding Wood, Carrollton, TX',	'residential',	2500,	'null',13),
+(45678,	'102 Winding Wood, Carrollton, TX',	'residential',	2800,	'null',14),
+(12321,	'210 Cherry Bark Lane, Plano, TX',	'residential',	3200,	'2016/10/1',15),
+(12321,	'212 Cherry Bark Lane, Plano, TX',	'residential',	null,	'null',16),
+(12321,	'214 Cherry Bark Lane, Plano, TX',	'residential',	null,	'null',17),
+(12321,	'216 Cherry Bark Lane, Plano, TX',	'residential',	null,	'null',18);
+
+insert into PendingInspections values('2018/9/1','FNL','105 Industrial Ave., Fort Worth, TX'),
+('2018/10/26','FRM','212 Cherry Bark Lane, Plano, TX'),
+('2018/11/4','PLU','212 Cherry Bark Lane, Plano, TX');
+
+
+select * from inspectors;
+select * from builders;
+select * from inspection;
+select * from buildings;
+select * from InspectionTypes;
+select * from PendingInspections;
+
+SELECT * FROM sqlite_master WHERE type='table';
